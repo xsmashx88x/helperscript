@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         smash SHiFT tracker redeem helper
 // @namespace    bl4-shift-helper-enhanced
-// @version      2.5.0
+// @version      2.5.1
 // @description  Receives codes from the tracker site and redeems them on the SHiFT page without new tabs.
 // @match        https://xsmashx88x.github.io/Shift-Codes/*
 // @match        https://shift.gearboxsoftware.com/rewards*
@@ -131,13 +131,11 @@
     return { type: 'unknown', text: '' };
   }
 
-  // ===== NEW STYLED UI PANEL =====
   function ensurePanel() {
     if ($('#shift-helper-panel')) return true;
     if (!document.body) return false;
     const panel = document.createElement('div');
     panel.id = 'shift-helper-panel';
-    // New styles to match the tracker site
     panel.style.cssText = 'position:fixed; right:18px; bottom:18px; width:500px; z-index:2147483647; background:rgb(14 14 14); color:#fff; border:2px solid #ffc600; border-radius:5px; box-shadow:0 0 15px rgba(255, 198, 0, 0.4); font-family: \'Oswald\', \'Chakra Petch\', sans-serif;';
     panel.innerHTML = `
       <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid #ffc600;">
@@ -162,15 +160,7 @@
         </div>
         <div id="sh-stats" style="font-size:13px; color:#ffc600; text-align:center; padding: 4px; background: #1a1a1a; border: 1px solid #ffc600; border-radius: 4px;">Ready.</div>
         <div id="sh-log" style="max-height:260px; overflow-y:auto; font-size:12px; background:#0a0a0a; border:1px solid #ffc600; border-radius:4px; padding:8px; line-height:1.6;"></div>
-        <details>
-            <summary style="cursor:pointer; font-size:12px; color:#ff9e40;">Advanced Options</summary>
-            <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; font-family: 'Chakra Petch', sans-serif;">
-                <button id="sh-load" title="Load a previously saved list of codes." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Load List</button>
-                <button id="sh-save" title="Save the codes currently in the text area." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Save List</button>
-                <button id="sh-export" title="Export the results of the last run as a CSV file." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Export Results</button>
-                <button id="sh-clear-attempts" title="Clear the history of all attempted codes." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Reset History</button>
-            </div>
-        </details>
+        <details><summary style="cursor:pointer; font-size:12px; color:#ff9e40;">Advanced Options</summary><div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; font-family: 'Chakra Petch', sans-serif;"><button id="sh-load" title="Load a previously saved list of codes." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Load List</button><button id="sh-save" title="Save the codes currently in the text area." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Save List</button><button id="sh-export" title="Export the results of the last run as a CSV file." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Export Results</button><button id="sh-clear-attempts" title="Clear the history of all attempted codes." style="background:#222; border:1px solid #ffc600; color:#ffc600; border-radius:4px; padding:8px 10px; cursor:pointer;">Reset History</button></div></details>
       </div>`;
     document.body.appendChild(panel);
     $('#sh-x').onclick = () => panel.remove();
@@ -189,6 +179,68 @@
   function parseCodes(text) {
     const matches = text.toUpperCase().match(CODE_RE) || []; return [...new Set(matches)];
   }
+
+  /* ================================================================================= */
+  /* ===== CORE REDEMPTION LOGIC (The step-by-step process for a single code)    ===== */
+  /* ================================================================================= */
+
+  // ===== THIS IS THE BLOCK OF MISSING FUNCTIONS THAT HAS BEEN RESTORED =====
+  async function clickCheck() {
+    const btn = deepFindClickable(txt => /(^|\b)(check|verify|submit|continue|redeem)(\b|$)/i.test(txt));
+    if (!btn) throw new Error('Could not find the "Check/Submit" button.');
+    btn.click();
+    await sleep(AFTER_CHECK_PAUSE_MS);
+  }
+  async function clickRedeemForPlatform(platform) {
+    const targetLabel = `redeem for ${platform.toLowerCase()}`;
+    const startTime = Date.now();
+    while (Date.now() - startTime < REDEEM_BTN_WAIT_MS) {
+      const btn = deepFindClickable(txt => txt.toLowerCase().includes(targetLabel));
+      if (btn) {
+        btn.click();
+        return true;
+      }
+      await sleep(150);
+    }
+    return false;
+  }
+  async function clickConfirmIfPresent() {
+    const startTime = Date.now();
+    while (Date.now() - startTime < CONFIRM_WAIT_MS) {
+      const btn = deepFindClickable(txt => /confirm|redeem|claim|accept|continue/i.test(txt));
+      if (btn) {
+        btn.click();
+        return true;
+      }
+      await sleep(150);
+    }
+    return false;
+  }
+  async function closeDialogsToasts() {
+    const closeLabels = ['close', 'ok', 'done', 'continue', 'got it', 'dismiss', 'x'];
+    for (let i = 0; i < 5; i++) {
+      const btn = deepFindClickable(txt => closeLabels.some(label => txt.toLowerCase().includes(label)));
+      if (btn) {
+        btn.click();
+        await sleep(250);
+      } else {
+        break;
+      }
+    }
+  }
+  async function waitForFormReady() {
+    const startTime = Date.now();
+    while (Date.now() - startTime < FORM_READY_TIMEOUT_MS) {
+      const input = deepFindInputNearCode();
+      if (input && !input.disabled && isVisible(input)) {
+        return input;
+      }
+      await sleep(FORM_READY_POLL_MS);
+    }
+    throw new Error('Form did not become ready for the next code.');
+  }
+  // ===== END OF RESTORED BLOCK =====
+
   async function redeemOne(code, platform) {
     const input = await waitForFormReady(); input.focus(); input.value = '';
     input.dispatchEvent(new Event('input', { bubbles: true })); await sleep(50);

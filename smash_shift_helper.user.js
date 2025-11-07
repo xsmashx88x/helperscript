@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         smash SHiFT tracker redeem helper
 // @namespace    bl4-shift-helper-enhanced
-// @version      2.5.1
-// @description  Receives codes from the tracker site and redeems them on the SHiFT page without new tabs.
+// @version      2.5.5
+// @description  Receives codes from the tracker site and redeems them on the SHiFT page. Groups expired/used codes into a single, more descriptive log message.
 // @match        https://xsmashx88x.github.io/Shift-Codes/*
 // @match        https://shift.gearboxsoftware.com/rewards*
 // @include      https://shift.gearboxsoftware.com/*
@@ -88,15 +88,16 @@
     for (const node of deepNodes()) { if (node instanceof HTMLInputElement && node.type === 'text' && isVisible(node)) return node; }
     return null;
   }
-  const STATUS_PATTERNS = { /* ... (This object is unchanged) ... */
-    success:   [/redeemed/i, /claimed/i, /added to/i, /success/i, /enjoy/i],
-    used:      [/already\s+(?:been\s+)?redeemed/i, /already used/i, /previously redeemed/i],
-    expired:   [/expired/i, /no longer valid/i, /out of date/i],
-    invalid:   [/invalid/i, /not (?:a )?valid/i, /not recognized/i, /does not exist/i],
-    throttled: [/too many/i, /rate.?limit/i, /try again later/i, /slow down/i],
-    platform:  [/not available on your platform/i, /wrong platform/i],
-    genericOk: [/code accepted/i],
+
+  const STATUS_PATTERNS = {
+    success:     [/redeemed/i, /claimed/i, /added to/i, /success/i, /enjoy/i],
+    unavailable: [/already\s+(?:been\s+)?redeemed/i, /already used/i, /previously redeemed/i, /expired/i, /no longer valid/i, /out of date/i],
+    invalid:     [/invalid/i, /not (?:a )?valid/i, /not recognized/i, /does not exist/i],
+    throttled:   [/too many/i, /rate.?limit/i, /try again later/i, /slow down/i],
+    platform:    [/not available on your platform/i, /wrong platform/i],
+    genericOk:   [/code accepted/i],
   };
+  
   function grabStatusTexts() { /* ... (This function is unchanged) ... */
     const texts = new Set();
     for (const node of deepNodes()) {
@@ -108,17 +109,21 @@
     }
     return Array.from(texts);
   }
-  function classifyStatus(texts) { /* ... (This function is unchanged) ... */
-    const combinedText = texts.join(' \n '); const test = patterns => patterns.some(re => re.test(combinedText));
-    if (test(STATUS_PATTERNS.success) || test(STATUS_PATTERNS.genericOk)) return { type: 'success', text: combinedText };
-    if (test(STATUS_PATTERNS.used)) return { type: 'used', text: combinedText };
-    if (test(STATUS_PATTERNS.expired)) return { type: 'expired', text: combinedText };
+  
+  function classifyStatus(texts) {
+    const combinedText = texts.join(' \n ');
+    const test = patterns => patterns.some(re => re.test(combinedText));
+    
+    if (test(STATUS_PATTERNS.unavailable)) return { type: 'unavailable', text: combinedText };
     if (test(STATUS_PATTERNS.invalid)) return { type: 'invalid', text: combinedText };
     if (test(STATUS_PATTERNS.platform)) return { type: 'platform', text: combinedText };
     if (test(STATUS_PATTERNS.throttled)) return { type: 'throttled', text: combinedText };
+    if (test(STATUS_PATTERNS.success) || test(STATUS_PATTERNS.genericOk)) return { type: 'success', text: combinedText };
+    
     return { type: 'unknown', text: combinedText };
   }
-  async function waitForStatus(timeoutMs) { /* ... (This function is unchanged) ... */
+
+  async function waitForStatus(timeoutMs) {
     const startTime = Date.now(); let lastSeenText = '';
     while (Date.now() - startTime < timeoutMs) {
       const texts = grabStatusTexts(); const currentText = texts.join('|');
@@ -184,7 +189,6 @@
   /* ===== CORE REDEMPTION LOGIC (The step-by-step process for a single code)    ===== */
   /* ================================================================================= */
 
-  // ===== THIS IS THE BLOCK OF MISSING FUNCTIONS THAT HAS BEEN RESTORED =====
   async function clickCheck() {
     const btn = deepFindClickable(txt => /(^|\b)(check|verify|submit|continue|redeem)(\b|$)/i.test(txt));
     if (!btn) throw new Error('Could not find the "Check/Submit" button.');
@@ -239,7 +243,6 @@
     }
     throw new Error('Form did not become ready for the next code.');
   }
-  // ===== END OF RESTORED BLOCK =====
 
   async function redeemOne(code, platform) {
     const input = await waitForFormReady(); input.focus(); input.value = '';
@@ -366,18 +369,28 @@
         try {
           const result = await redeemOne(code, platform);
           state.results.push({ code, status: result.type, details: result.text });
-          markAttempted(codeUpper, state.attempted); consecutiveErrors = 0;
+          markAttempted(codeUpper, state.attempted);
+          consecutiveErrors = 0;
           let kind = 'info', message = 'Status unknown';
+          
           switch (result.type) {
-            case 'success':   kind = 'ok';    message = '✅ Success';           state.success++; break;
-            case 'used':      kind = 'warn';  message = '⚠️ Already used';      state.errors++;  break;
-            case 'expired':   kind = 'warn';  message = '⚠️ Expired';           state.errors++;  break;
-            case 'invalid':   kind = 'error'; message = '❌ Invalid';           state.errors++;  break;
-            case 'platform':  kind = 'warn';  message = '⚠️ Wrong platform';    state.errors++;  break;
-            case 'throttled': kind = 'warn';  message = '⏳ Rate limited';       state.errors++;  break;
+            case 'success':     kind = 'ok';    message = '✅ Active';                  state.success++; break;
+            case 'unavailable': kind = 'error'; message = '❌ Expired/Already Used';  state.errors++;  break;
+            case 'invalid':     kind = 'error'; message = '❌ Invalid';                  state.errors++;  break;
+            case 'platform':    kind = 'warn';  message = '⚠️ Wrong platform';         state.errors++;  break;
+            case 'throttled':   kind = 'warn';  message = '⏳ Rate limited';            state.errors++;  break;
           }
-          log(`${message}: ${code}`, kind);
-          if (result.text) { log(`   Details: ${result.text.substring(0, 180)}...`, 'info'); }
+
+          // ===== THIS LOGGING BLOCK HAS BEEN MODIFIED =====
+          if (result.type === 'unavailable') {
+            const reason = "This code has expired or been redeemed already.";
+            log(`${message}: ${reason} (${code})`, kind);
+          } else {
+            log(`${message}: ${code}`, kind);
+            if (result.text) { log(`   Details: ${result.text.substring(0, 180)}...`, 'info'); }
+          }
+          // ===== END OF MODIFICATION =====
+
         } catch (e) {
           state.errors++; consecutiveErrors++; log(`Error on ${code}: ${e.message}`, 'error');
           if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) { log('Stopping due to too many consecutive errors.', 'error'); state.running = false; break; }

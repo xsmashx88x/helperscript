@@ -97,7 +97,7 @@
     platform:    [/not available on your platform/i, /wrong platform/i],
     genericOk:   [/code accepted/i],
   };
-  
+
   function grabStatusTexts() { /* ... (This function is unchanged) ... */
     const texts = new Set();
     for (const node of deepNodes()) {
@@ -109,17 +109,17 @@
     }
     return Array.from(texts);
   }
-  
+
   function classifyStatus(texts) {
     const combinedText = texts.join(' \n ');
     const test = patterns => patterns.some(re => re.test(combinedText));
-    
+
     if (test(STATUS_PATTERNS.unavailable)) return { type: 'unavailable', text: combinedText };
     if (test(STATUS_PATTERNS.invalid)) return { type: 'invalid', text: combinedText };
     if (test(STATUS_PATTERNS.platform)) return { type: 'platform', text: combinedText };
     if (test(STATUS_PATTERNS.throttled)) return { type: 'throttled', text: combinedText };
     if (test(STATUS_PATTERNS.success) || test(STATUS_PATTERNS.genericOk)) return { type: 'success', text: combinedText };
-    
+
     return { type: 'unknown', text: combinedText };
   }
 
@@ -372,7 +372,7 @@
           markAttempted(codeUpper, state.attempted);
           consecutiveErrors = 0;
           let kind = 'info', message = 'Status unknown';
-          
+
           switch (result.type) {
             case 'success':     kind = 'ok';    message = '✅ Active';                  state.success++; break;
             case 'unavailable': kind = 'error'; message = '❌ Expired/Already Used';  state.errors++;  break;
